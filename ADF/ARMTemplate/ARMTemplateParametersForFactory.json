@@ -1,0 +1,27 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "factoryName": {
+            "value": "RetailADFProject-1"
+        },
+        "AzureDataLakeStorage1_accountKey": {
+            "value": ""
+        },
+        "SqlServer1_password": {
+            "value": ""
+        },
+        "AzureDataLakeStorage1_properties_typeProperties_url": {
+            "value": "https://project1azure1.dfs.core.windows.net/"
+        },
+        "SqlServer1_properties_typeProperties_server": {
+            "value": "LAPTOP-ESAHFGSI\\SQLEXPRESS"
+        },
+        "SqlServer1_properties_typeProperties_database": {
+            "value": "retailrocket1"
+        },
+        "SqlServer1_properties_typeProperties_userName": {
+            "value": "adf_user"
+        }
+    }
+}

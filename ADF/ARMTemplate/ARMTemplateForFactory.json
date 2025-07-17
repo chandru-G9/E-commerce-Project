@@ -1,0 +1,451 @@
+{
+    "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "factoryName": {
+            "type": "string",
+            "metadata": "Data Factory name",
+            "defaultValue": "RetailADFProject-1"
+        },
+        "AzureDataLakeStorage1_accountKey": {
+            "type": "secureString",
+            "metadata": "Secure string for 'accountKey' of 'AzureDataLakeStorage1'"
+        },
+        "SqlServer1_password": {
+            "type": "secureString",
+            "metadata": "Secure string for 'password' of 'SqlServer1'"
+        },
+        "AzureDataLakeStorage1_properties_typeProperties_url": {
+            "type": "string",
+            "defaultValue": "https://project1azure1.dfs.core.windows.net/"
+        },
+        "SqlServer1_properties_typeProperties_server": {
+            "type": "string",
+            "defaultValue": "LAPTOP-ESAHFGSI\\SQLEXPRESS"
+        },
+        "SqlServer1_properties_typeProperties_database": {
+            "type": "string",
+            "defaultValue": "retailrocket1"
+        },
+        "SqlServer1_properties_typeProperties_userName": {
+            "type": "string",
+            "defaultValue": "adf_user"
+        }
+    },
+    "variables": {
+        "factoryId": "[concat('Microsoft.DataFactory/factories/', parameters('factoryName'))]"
+    },
+    "resources": [
+        {
+            "name": "[concat(parameters('factoryName'), '/adls')]",
+            "type": "Microsoft.DataFactory/factories/datasets",
+            "apiVersion": "2018-06-01",
+            "properties": {
+                "linkedServiceName": {
+                    "referenceName": "AzureDataLakeStorage1",
+                    "type": "LinkedServiceReference"
+                },
+                "parameters": {
+                    "FolderPath": {
+                        "type": "string"
+                    },
+                    "SubFolderpath": {
+                        "type": "string"
+                    },
+                    "FileName": {
+                        "type": "string"
+                    }
+                },
+                "annotations": [],
+                "type": "DelimitedText",
+                "typeProperties": {
+                    "location": {
+                        "type": "AzureBlobFSLocation",
+                        "fileName": {
+                            "value": "@dataset().FileName",
+                            "type": "Expression"
+                        },
+                        "folderPath": {
+                            "value": "@dataset().SubFolderpath",
+                            "type": "Expression"
+                        },
+                        "fileSystem": {
+                            "value": "@dataset().FolderPath",
+                            "type": "Expression"
+                        }
+                    },
+                    "columnDelimiter": ",",
+                    "escapeChar": "\\",
+                    "firstRowAsHeader": true,
+                    "quoteChar": "\""
+                },
+                "schema": []
+            },
+            "dependsOn": [
+                "[concat(variables('factoryId'), '/linkedServices/AzureDataLakeStorage1')]"
+            ]
+        },
+        {
+            "name": "[concat(parameters('factoryName'), '/onpremise')]",
+            "type": "Microsoft.DataFactory/factories/datasets",
+            "apiVersion": "2018-06-01",
+            "properties": {
+                "linkedServiceName": {
+                    "referenceName": "SqlServer1",
+                    "type": "LinkedServiceReference"
+                },
+                "parameters": {
+                    "TableName": {
+                        "type": "string"
+                    },
+                    "Schema": {
+                        "type": "string"
+                    }
+                },
+                "annotations": [],
+                "type": "SqlServerTable",
+                "schema": [],
+                "typeProperties": {
+                    "schema": {
+                        "value": "@dataset().Schema",
+                        "type": "Expression"
+                    },
+                    "table": {
+                        "value": "@dataset().TableName",
+                        "type": "Expression"
+                    }
+                }
+            },
+            "dependsOn": [
+                "[concat(variables('factoryId'), '/linkedServices/SqlServer1')]"
+            ]
+        },
+        {
+            "name": "[concat(parameters('factoryName'), '/IngestSingletable')]",
+            "type": "Microsoft.DataFactory/factories/pipelines",
+            "apiVersion": "2018-06-01",
+            "properties": {
+                "activities": [
+                    {
+                        "name": "ValidateTable",
+                        "type": "Lookup",
+                        "dependsOn": [],
+                        "policy": {
+                            "timeout": "0.12:00:00",
+                            "retry": 0,
+                            "retryIntervalInSeconds": 30,
+                            "secureOutput": false,
+                            "secureInput": false
+                        },
+                        "userProperties": [],
+                        "typeProperties": {
+                            "source": {
+                                "type": "SqlServerSource",
+                                "sqlReaderQuery": {
+                                    "value": "select count(*) as Total from @{pipeline().parameters.Schema}.@{pipeline().parameters.TableName}",
+                                    "type": "Expression"
+                                },
+                                "queryTimeout": "02:00:00",
+                                "partitionOption": "None"
+                            },
+                            "dataset": {
+                                "referenceName": "onpremise",
+                                "type": "DatasetReference",
+                                "parameters": {
+                                    "TableName": {
+                                        "value": "@pipeline().parameters.TableName",
+                                        "type": "Expression"
+                                    },
+                                    "Schema": {
+                                        "value": "@pipeline().parameters.Schema",
+                                        "type": "Expression"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "name": "checkIfRowsExists",
+                        "type": "IfCondition",
+                        "dependsOn": [
+                            {
+                                "activity": "ValidateTable",
+                                "dependencyConditions": [
+                                    "Succeeded"
+                                ]
+                            }
+                        ],
+                        "userProperties": [],
+                        "typeProperties": {
+                            "expression": {
+                                "value": "@greater(activity('ValidateTable').output.firstRow.Total, 0)\n",
+                                "type": "Expression"
+                            },
+                            "ifTrueActivities": [
+                                {
+                                    "name": "CopyTableToAdls",
+                                    "type": "Copy",
+                                    "dependsOn": [],
+                                    "policy": {
+                                        "timeout": "0.12:00:00",
+                                        "retry": 0,
+                                        "retryIntervalInSeconds": 30,
+                                        "secureOutput": false,
+                                        "secureInput": false
+                                    },
+                                    "userProperties": [],
+                                    "typeProperties": {
+                                        "source": {
+                                            "type": "SqlServerSource",
+                                            "sqlReaderQuery": {
+                                                "value": "SELECT * FROM @{pipeline().parameters.Schema}.@{pipeline().parameters.TableName}\n",
+                                                "type": "Expression"
+                                            },
+                                            "queryTimeout": "02:00:00",
+                                            "partitionOption": "None"
+                                        },
+                                        "sink": {
+                                            "type": "DelimitedTextSink",
+                                            "storeSettings": {
+                                                "type": "AzureBlobFSWriteSettings"
+                                            },
+                                            "formatSettings": {
+                                                "type": "DelimitedTextWriteSettings",
+                                                "quoteAllText": true,
+                                                "fileExtension": ".txt"
+                                            }
+                                        },
+                                        "enableStaging": false,
+                                        "translator": {
+                                            "type": "TabularTranslator",
+                                            "typeConversion": true,
+                                            "typeConversionSettings": {
+                                                "allowDataTruncation": true,
+                                                "treatBooleanAsNumber": false
+                                            }
+                                        }
+                                    },
+                                    "inputs": [
+                                        {
+                                            "referenceName": "onpremise",
+                                            "type": "DatasetReference",
+                                            "parameters": {
+                                                "TableName": {
+                                                    "value": "@pipeline().parameters.TableName",
+                                                    "type": "Expression"
+                                                },
+                                                "Schema": {
+                                                    "value": "@pipeline().parameters.Schema",
+                                                    "type": "Expression"
+                                                }
+                                            }
+                                        }
+                                    ],
+                                    "outputs": [
+                                        {
+                                            "referenceName": "adls",
+                                            "type": "DatasetReference",
+                                            "parameters": {
+                                                "FolderPath": {
+                                                    "value": "@pipeline().parameters.FolderPath",
+                                                    "type": "Expression"
+                                                },
+                                                "SubFolderpath": {
+                                                    "value": "@pipeline().parameters.SubFolderPath",
+                                                    "type": "Expression"
+                                                },
+                                                "FileName": {
+                                                    "value": "@pipeline().parameters.FileName",
+                                                    "type": "Expression"
+                                                }
+                                            }
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "policy": {
+                    "elapsedTimeMetric": {}
+                },
+                "parameters": {
+                    "TableName": {
+                        "type": "String"
+                    },
+                    "FolderPath": {
+                        "type": "string"
+                    },
+                    "SubFolderPath": {
+                        "type": "string"
+                    },
+                    "Schema": {
+                        "type": "string"
+                    },
+                    "FileName": {
+                        "type": "string"
+                    }
+                },
+                "annotations": [],
+                "lastPublishTime": "2025-07-03T18:37:33Z"
+            },
+            "dependsOn": [
+                "[concat(variables('factoryId'), '/datasets/onpremise')]",
+                "[concat(variables('factoryId'), '/datasets/adls')]"
+            ]
+        },
+        {
+            "name": "[concat(parameters('factoryName'), '/ingestAllTables')]",
+            "type": "Microsoft.DataFactory/factories/pipelines",
+            "apiVersion": "2018-06-01",
+            "properties": {
+                "activities": [
+                    {
+                        "name": "set tables to ingest",
+                        "type": "SetVariable",
+                        "dependsOn": [],
+                        "policy": {
+                            "secureOutput": false,
+                            "secureInput": false
+                        },
+                        "userProperties": [],
+                        "typeProperties": {
+                            "variableName": "tablesToIngest",
+                            "value": {
+                                "value": "@json('[\n  {\n    \"TableName\": \"events\",\n    \"FolderPath\": \"bronze\",\n    \"SubFolderPath\": \"sales\",\n    \"FileName\": \"events.csv\",\n    \"Schema\": \"dbo\"\n  },\n  {\n    \"TableName\": \"item_properties_part1\",\n    \"FolderPath\": \"bronze\",\n    \"SubFolderPath\": \"inventory\",\n    \"FileName\": \"item_properties_part1.csv\",\n    \"Schema\": \"dbo\"\n\n  },\n  {\n    \"TableName\": \"item_properties_part2\",\n    \"FolderPath\": \"bronze\",\n    \"SubFolderPath\": \"inventory\",\n    \"FileName\": \"item_properties_part2.csv\",\n    \"Schema\": \"dbo\"\n\n  },\n  {\n    \"TableName\": \"category_tree\",\n    \"FolderPath\": \"bronze\",\n    \"SubFolderPath\": \"inventory\",\n    \"FileName\": \"category_tree.csv\",\n    \"Schema\": \"dbo\"\n\n  }\n]')\n",
+                                "type": "Expression"
+                            }
+                        }
+                    },
+                    {
+                        "name": "ForEach1",
+                        "type": "ForEach",
+                        "dependsOn": [
+                            {
+                                "activity": "set tables to ingest",
+                                "dependencyConditions": [
+                                    "Succeeded"
+                                ]
+                            }
+                        ],
+                        "userProperties": [],
+                        "typeProperties": {
+                            "items": {
+                                "value": "@variables('tablesToIngest')",
+                                "type": "Expression"
+                            },
+                            "activities": [
+                                {
+                                    "name": "Execute ingestSingleTable pipeline",
+                                    "type": "ExecutePipeline",
+                                    "dependsOn": [],
+                                    "policy": {
+                                        "secureInput": false
+                                    },
+                                    "userProperties": [],
+                                    "typeProperties": {
+                                        "pipeline": {
+                                            "referenceName": "IngestSingletable",
+                                            "type": "PipelineReference"
+                                        },
+                                        "waitOnCompletion": true,
+                                        "parameters": {
+                                            "TableName": {
+                                                "value": "@item().TableName",
+                                                "type": "Expression"
+                                            },
+                                            "FolderPath": {
+                                                "value": "@item().FolderPath",
+                                                "type": "Expression"
+                                            },
+                                            "SubFolderPath": {
+                                                "value": "@item().SubFolderPath",
+                                                "type": "Expression"
+                                            },
+                                            "Schema": {
+                                                "value": "@item().Schema",
+                                                "type": "Expression"
+                                            },
+                                            "FileName": {
+                                                "value": "@item().FileName",
+                                                "type": "Expression"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "policy": {
+                    "elapsedTimeMetric": {}
+                },
+                "variables": {
+                    "tablesToIngest": {
+                        "type": "Array"
+                    }
+                },
+                "annotations": [],
+                "lastPublishTime": "2025-07-03T18:37:34Z"
+            },
+            "dependsOn": [
+                "[concat(variables('factoryId'), '/pipelines/IngestSingletable')]"
+            ]
+        },
+        {
+            "name": "[concat(parameters('factoryName'), '/LocalSQLRuntime')]",
+            "type": "Microsoft.DataFactory/factories/integrationRuntimes",
+            "apiVersion": "2018-06-01",
+            "properties": {
+                "type": "SelfHosted",
+                "typeProperties": {}
+            },
+            "dependsOn": []
+        },
+        {
+            "name": "[concat(parameters('factoryName'), '/AzureDataLakeStorage1')]",
+            "type": "Microsoft.DataFactory/factories/linkedServices",
+            "apiVersion": "2018-06-01",
+            "properties": {
+                "annotations": [],
+                "type": "AzureBlobFS",
+                "typeProperties": {
+                    "url": "[parameters('AzureDataLakeStorage1_properties_typeProperties_url')]",
+                    "accountKey": {
+                        "type": "SecureString",
+                        "value": "[parameters('AzureDataLakeStorage1_accountKey')]"
+                    }
+                }
+            },
+            "dependsOn": []
+        },
+        {
+            "name": "[concat(parameters('factoryName'), '/SqlServer1')]",
+            "type": "Microsoft.DataFactory/factories/linkedServices",
+            "apiVersion": "2018-06-01",
+            "properties": {
+                "annotations": [],
+                "type": "SqlServer",
+                "typeProperties": {
+                    "server": "[parameters('SqlServer1_properties_typeProperties_server')]",
+                    "database": "[parameters('SqlServer1_properties_typeProperties_database')]",
+                    "encrypt": "mandatory",
+                    "trustServerCertificate": true,
+                    "authenticationType": "SQL",
+                    "userName": "[parameters('SqlServer1_properties_typeProperties_userName')]",
+                    "password": {
+                        "type": "SecureString",
+                        "value": "[parameters('SqlServer1_password')]"
+                    }
+                },
+                "connectVia": {
+                    "referenceName": "LocalSQLRuntime",
+                    "type": "IntegrationRuntimeReference"
+                }
+            },
+            "dependsOn": [
+                "[concat(variables('factoryId'), '/integrationRuntimes/LocalSQLRuntime')]"
+            ]
+        }
+    ]
+}
